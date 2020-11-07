@@ -15,36 +15,37 @@ def gen_board(rows: int, columns: int, nmines: int = None):
         return "\n".join((' '.join(('?' if hidden and c != 0 else str(c) for c in row)) for row in board))
 
     if nmines is None:
-        nmines = int((rows*columns) * (1/5))
+        nmines = int((rows * columns) * (1 / 5))
     assert nmines < rows * columns
 
-    board = [0 for _ in range(rows*columns)]    # create empty board in 1 dimension
-    board[:nmines] = ['x' for _ in range(nmines)]   # populate the first few spaces with mines
-    shuffle(board)  # mix up the board
-    board = [board[n * columns: (n+1) * columns] for n in range(rows)]  # translate board into 2 dimensions
+    board, key = "", ""
+    # only return a board with at least one '0' in it
+    while '0' not in key:
+        board = [0 for _ in range(rows * columns)]  # create empty board in 1 dimension
+        board[:nmines] = ['x' for _ in range(nmines)]  # populate the first few spaces with mines
+        shuffle(board)  # mix up the board
+        board = [board[n * columns: (n + 1) * columns] for n in range(rows)]  # translate board into 2 dimensions
+        mine_spots = [(r, c) for r in range(rows) for c in range(columns) if board[r][c] == 'x']  # find the mines
 
-    mine_spots = [(r, c) for r in range(rows) for c in range(columns) if board[r][c] == 'x']    # find the mines
+        # For each mine:
+        for _ in range(len(mine_spots)):
+            row_num, col_num = mine_spots.pop()
+            # Update counts in squares left & right of mine
+            update_left_right(row_num, col_num)
 
-    # For each mine:
-    for _ in range(len(mine_spots)):
-        row_num, col_num = mine_spots.pop()
-        # Update counts in squares left & right of mine
-        update_left_right(row_num, col_num)
+            # Update squares in row above
+            if row_num:
+                if board[row_num - 1][col_num] != 'x':
+                    board[row_num - 1][col_num] += 1
+                update_left_right(row_num - 1, col_num)
 
-        # Update squares in row above
-        if row_num:
-            if board[row_num-1][col_num] != 'x':
-                board[row_num - 1][col_num] += 1
-            update_left_right(row_num-1, col_num)
-
-        # Update squares in row below
-        if row_num < rows - 1:
-            if board[row_num + 1][col_num] != 'x':
-                board[row_num + 1][col_num] += 1
-            update_left_right(row_num+1, col_num)
-
-    return make_string(hidden=True), make_string()
-
+            # Update squares in row below
+            if row_num < rows - 1:
+                if board[row_num + 1][col_num] != 'x':
+                    board[row_num + 1][col_num] += 1
+                update_left_right(row_num + 1, col_num)
+        board, key = make_string(hidden=True), make_string()
+    return board, key
 
 
 if __name__ == '__main__':

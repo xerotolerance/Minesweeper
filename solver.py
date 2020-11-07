@@ -13,6 +13,10 @@ def open(row: int, column: int) -> Union[bool, int]:
 
 def solve_mine(map, n):
     # coding and coding...
+    def get_adjacent(row, col):
+        return {(r, c) for r in range(row - 1, row + 2) for c in range(col - 1, col + 2) if
+                -1 < r < len(board) and -1 < c < len(board[r]) and (r, c) != (row, col)}
+
     def unpack_zeros(zeros):
         wave = 0
         print(f'Wave: {wave}')
@@ -23,18 +27,14 @@ def solve_mine(map, n):
         frontier = set()
         while zeros:
             for _ in range(len(zeros)):
-                row, col = zeros.pop()
-                for row_offset in range(-1, 2):
-                    target_row = row + row_offset
-                    if -1 < target_row < len(board):
-                        for col_offset in range(-1, 2):
-                            target_col = col + col_offset
-                            if -1 < target_col < len(board[row + row_offset]) and board[target_row][target_col] == '?':
-                                board[target_row][target_col] = str(open(target_row, target_col))
-                                if board[target_row][target_col] == '0':
-                                    zeros.add((target_row, target_col))
-                                else:
-                                    frontier.add((target_row, target_col))
+                expandable = {pos for pos in get_adjacent(*zeros.pop()) if board[pos[0]][pos[1]] == '?'}
+                for row, col in expandable:
+                    board[row][col] = str(open(row, col))
+                    if board[row][col] == '0':
+                        zeros.add((row, col))
+                    else:
+                        frontier.add((row, col))
+
             print(f'Wave: {wave}')
             wave += 1
             for row in board:
@@ -43,29 +43,59 @@ def solve_mine(map, n):
         return frontier
 
     def gather_unknowns(row, col):
-        unknowns = set()
-        for roff in range(row-1, row+2):
-            if -1 < roff < len(board):
-                for coff in range(col-1, col+2):
-                    if -1 < coff < len(board[roff]) and board[roff][coff] == '?':
-                        unknowns.add((roff, coff))
-        return unknowns
+        unknown, confirmed = set(), set()
+        for r, c in get_adjacent(row, col):
+            if board[r][c] == '?':
+                unknown.add((r, c))
+            elif board[r][c] == 'x':
+                confirmed.add((r, c))
+        return unknown, confirmed
 
+    def simple_analysis(frontier):
+        while frontier:
+            last_gen = frontier
+            print(f'frontier: {frontier}')
+            for _ in range(len(frontier)):
+                row_num, col_num = frontier.pop()
+                hint = int(board[row_num][col_num])
+                unknowns, confirmed = gather_unknowns(row_num, col_num)
+                if len(unknowns) + len(confirmed) == hint:
+                    for _ in range(len(unknowns)):
+                        r, c = unknowns.pop()
+                        board[r][c] = 'x'
+                        mines_found[0] += 1
+                        confirmed.add((r, c))
+                        for row in board:
+                            print(row)
+                        print()
+                if len(confirmed) == hint:
+                    for r, c in {pos for pos in get_adjacent(row_num, col_num) if board[pos[0]][pos[1]] == '?'}:
+                        board[r][c] = str(open(r, c))
+                        frontier.add((r, c))
+                else:
+                    frontier.add((row_num, col_num))
+
+            if mines_found[0] == nmines:
+                for r in range(len(board)):
+                    for c in range(len(board[r])):
+                        if board[r][c] == '?':
+                            board[r][c] = open(r, c)
+                break
+            elif frontier == last_gen:
+                return '?'
+            print()
+        return frontier
+
+    mines_found = [0]
     board = [row.split(' ') for row in map.splitlines()]
     zeros = {(r, c) for r in range(len(board)) for c in range(len(board[r])) if board[r][c] == '0'}
-    frontier = unpack_zeros(zeros)
-    print(f'frontier: {frontier}')
-    for row, col in frontier:
-        unknowns = gather_unknowns(row, col)
-        """if len(unknowns) <= int(board[row][col]):
-            for _ in range(len(unknowns)):
-                r, c = unknowns.pop()
-                board[r][c] = 'x'"""
+    frontier = simple_analysis(unpack_zeros(zeros))
     for row in board:
         print(row)
     print()
-    print()
-
+    if mines_found[0] == nmines:
+        return "\n".join((" ".join(row) for row in board))
+    return '?'
 
 
 def test_open():
@@ -86,7 +116,8 @@ def test_open():
 
 
 if __name__ == '__main__':
-    nmines = 5*5//5
-    board, key = gen_board(5, 5, nmines)
-    solve_mine(board, nmines)
+    rows, columns = 10, 5
+    nmines = rows*columns//5
+    board, key = gen_board(rows, columns)
+    print(solve_mine(board, nmines))
 
