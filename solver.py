@@ -7,23 +7,65 @@ def open(row: int, column: int) -> Union[bool, int]:
     assert 'board' in globals()
     _key: List[List[str]] = [[c for c in _row.split()] for _row in key.splitlines()]
     res: str = _key[row][column]
-    return int(res) if res != 'x' else False
+    assert res != 'x'
+    return int(res)
 
 
 def solve_mine(map, n):
     # coding and coding...
-    board = [row.split(' ') for row in map.splitlines()]
-    while True:
+    def unpack_zeros(zeros):
+        wave = 0
+        print(f'Wave: {wave}')
+        wave += 1
         for row in board:
             print(row)
-
-        zeros = 0  # [(row, col) for row in range(len(board)) for col in range(len(board[row])) if board[row][col] == '0']
-        if zeros:
+        print()
+        frontier = set()
+        while zeros:
             for _ in range(len(zeros)):
                 row, col = zeros.pop()
-                board[row][col] = open(row, col)
-        else:
-            break
+                for row_offset in range(-1, 2):
+                    target_row = row + row_offset
+                    if -1 < target_row < len(board):
+                        for col_offset in range(-1, 2):
+                            target_col = col + col_offset
+                            if -1 < target_col < len(board[row + row_offset]) and board[target_row][target_col] == '?':
+                                board[target_row][target_col] = str(open(target_row, target_col))
+                                if board[target_row][target_col] == '0':
+                                    zeros.add((target_row, target_col))
+                                else:
+                                    frontier.add((target_row, target_col))
+            print(f'Wave: {wave}')
+            wave += 1
+            for row in board:
+                print(row)
+            print()
+        return frontier
+
+    def gather_unknowns(row, col):
+        unknowns = set()
+        for roff in range(row-1, row+2):
+            if -1 < roff < len(board):
+                for coff in range(col-1, col+2):
+                    if -1 < coff < len(board[roff]) and board[roff][coff] == '?':
+                        unknowns.add((roff, coff))
+        return unknowns
+
+    board = [row.split(' ') for row in map.splitlines()]
+    zeros = {(r, c) for r in range(len(board)) for c in range(len(board[r])) if board[r][c] == '0'}
+    frontier = unpack_zeros(zeros)
+    print(f'frontier: {frontier}')
+    for row, col in frontier:
+        unknowns = gather_unknowns(row, col)
+        """if len(unknowns) <= int(board[row][col]):
+            for _ in range(len(unknowns)):
+                r, c = unknowns.pop()
+                board[r][c] = 'x'"""
+    for row in board:
+        print(row)
+    print()
+    print()
+
 
 
 def test_open():
