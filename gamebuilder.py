@@ -12,7 +12,7 @@ def gen_board(rows: int, columns: int, nmines: int = None):
             board[r][c + 1] += 1
 
     def make_string(hidden=False):
-        return "\n".join((' '.join(('?' if hidden and c != 0 else str(c) for c in row)) for row in board))
+        return "\n".join((' '.join(('?' if hidden and c != 0 else str(c) for c in row)) for row in board)) + "\n"
 
     if nmines is None:
         nmines = int((rows * columns) * (1 / 5))
