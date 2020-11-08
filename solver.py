@@ -42,7 +42,7 @@ def solve_mine(map, n):
             print()
         return frontier
 
-    def gather_unknowns(row, col):
+    def gather_unknowns(row: int, col: int):
         unknown, confirmed = set(), set()
         for r, c in get_adjacent(row, col):
             if board[r][c] == '?':
@@ -57,23 +57,32 @@ def solve_mine(map, n):
             print(f'frontier: {frontier}')
             for _ in range(len(frontier)):
                 row_num, col_num = frontier.pop()
+                print(f'{(row_num, col_num)}')
                 hint = int(board[row_num][col_num])
                 unknowns, confirmed = gather_unknowns(row_num, col_num)
                 if len(unknowns) + len(confirmed) == hint:
                     for _ in range(len(unknowns)):
                         r, c = unknowns.pop()
+                        print(f'{(row_num, col_num)}')
                         board[r][c] = 'x'
                         mines_found[0] += 1
                         confirmed.add((r, c))
                         for row in board:
                             print(row)
+                        input()
                         print()
+
                 if len(confirmed) == hint:
                     for r, c in {pos for pos in get_adjacent(row_num, col_num) if board[pos[0]][pos[1]] == '?'}:
                         board[r][c] = str(open(r, c))
                         frontier.add((r, c))
+                        for row in board:
+                            print(row)
+                        input()
+                        print()
                 else:
                     frontier.add((row_num, col_num))
+
 
             if mines_found[0] == nmines:
                 for r in range(len(board)):
@@ -116,7 +125,7 @@ def test_open():
 
 
 if __name__ == '__main__':
-    rows, columns = 10, 5
+    rows, columns = 5, 5
     nmines = rows*columns//5
     board, key = gen_board(rows, columns)
     print(solve_mine(board, nmines))
