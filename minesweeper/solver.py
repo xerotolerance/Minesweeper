@@ -1,6 +1,6 @@
 from typing import Union, List
 
-from gamebuilder import gen_board
+from minesweeper import gen_board
 
 
 def open(row: int, column: int) -> Union[bool, int]:

@@ -1,4 +1,14 @@
 from random import shuffle
+from typing import List
+
+key = None
+
+
+def open(row: int, column: int) -> int:
+    _key: List[List[str]] = [[c for c in _row.split()] for _row in key.splitlines()]
+    res: str = _key[row][column]
+    assert res != 'x'
+    return int(res)
 
 
 def gen_board(rows: int, columns: int, nmines: int = None):
