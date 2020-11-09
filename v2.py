@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, FrozenSet, Optional
 
 from gamebuilder import *
 
@@ -80,6 +80,117 @@ def solve_mine(map: str, n: int) -> str:
     :return: a string representation of the solved 2d-board or a single '?' if board is unsolvable.
     """
 
+    def get_frontier() -> Dict[Tuple[int, int], Gridspace]:
+        # Get '?'-adjacent hint spaces
+        return {pos: space for pos, space in lookup.items() if space.hint.isnumeric() and any(
+            lookup[neighbor].hint == '?' for neighbor in space.neighbors.values() if neighbor)}
+
+    def get_exclusion_zones(frontier: Dict[Tuple[int, int], Gridspace]) -> Dict[FrozenSet[Optional[Tuple[int, int]]], int]:
+        """
+        Group the frontier-adjacent '?' spaces into pairs of "zone, frequency", where 'zone' is a group of spaces & 'frequency' is the # of mines hiding in zone.
+
+        :param frontier: a dictionary representing the squares immediately surrounded by '?'s
+        :return: a dictionary of zones & the # of mines within those zones
+        """
+
+        exclusion_zones = {}
+        for pos, space in frontier.items():
+            nunkown = int(space.hint) - sum(
+                1 for neighbor in space.neighbors.values() if neighbor and lookup[neighbor].hint == 'x')
+            exclusion_zones.update(
+                {frozenset(neighbor for neighbor in space.neighbors.values() if
+                           neighbor and lookup[neighbor].hint == '?'): nunkown})
+        return exclusion_zones
+
+    def group_by_coord(exclusion_zones: Dict[FrozenSet[Optional[Tuple[int, int]]], int]):
+        """
+        Get a nested dictionary tracking which squares are in which zones.
+
+        :param exclusion_zones: a dictionary of zones & the # of mines within those zones
+        :return: Nested dictionary as such, {(row, col): {frequency: {zone0, zone1, ...}}}
+        """
+        by_coord = {}
+        for zone in exclusion_zones:
+            freq = exclusion_zones[zone]
+            for spot in zone:
+                by_coord[spot] = by_coord.setdefault(spot, dict())
+                by_coord[spot][freq] = by_coord[spot].setdefault(freq, set())
+                by_coord[spot][freq].add(zone)
+        return by_coord
+
+    def update_zones(exclusion_zones: Dict[FrozenSet[Optional[Tuple[int, int]]], int]) -> Tuple[bool, bool]:
+        """
+        Deduces additional exclusion zones from visible hints & known zones. (May also find & mark mines).
+
+        :param exclusion_zones: a dictionary of zones & the # of mines within those zones
+        :return: Whether any additional zones were discovered + whether any mines were discovered. (Side-effect: updates solve_mine.lookup)
+        """
+
+        by_coord = group_by_coord(exclusion_zones)
+        mine_found, zone_added = False, False
+
+        for coord, zones_by_frequency in by_coord.items():
+            for freq, zones in zones_by_frequency.items():
+                for other_freq, other_zones in zones_by_frequency.items():
+                    for zone in zones:
+                        for other_zone in other_zones:
+                            if freq == other_freq:
+                                new_zone = zone ^ other_zone
+                                if len(new_zone) == 1:
+                                    print(end='')
+                                if new_zone and new_zone not in exclusion_zones:
+                                    exclusion_zones[new_zone] = 1
+                                    zone_added = True
+                            else:
+                                new_zone = zone - other_zone if freq > other_freq else other_zone - zone
+                                if len(new_zone) > 1:
+                                    exclusion_zones[new_zone] = abs(freq - other_freq)
+                                else:
+                                    lookup[set(new_zone).pop()].hint = 'x'
+                                    mine_found = True
+                                    if display:
+                                        print(hashmaptostring(lookup, len(board_2d), len(board_2d[0])))
+                                        print()
+                                    return mine_found, mine_found
+        return zone_added, mine_found
+
+    def find_by_exclusion_zone(exclusion_zones: Dict[FrozenSet[Optional[Tuple[int, int]]], int], display: bool = False) -> bool:
+        """
+        Find & open safe-spaces by comparing zones of mutual exclusivity based off exposed hints.
+
+        :param exclusion_zones: a dictionary of zones & the # of mines within those zones
+        :param display: Prints board state after execution if True
+        :return: True if board state was altered. (Updates param exclusion_zones & solve_mine.lookup by side-effect)
+        """
+        updated = False
+        # Check for zones which are entirely within a different, larger zone
+        for zone, level in sorted(list(exclusion_zones.items()), key=lambda pair: len(pair[0]), reverse=False):
+            for other, other_level in sorted(list(exclusion_zones.items()), key=lambda pair: len(pair[0]),
+                                             reverse=True):
+                if len(zone) > len(other):
+                    # Only perform check when zone is small enough
+                    #  to fit inside other
+                    break
+                elif zone < other:  # set operation: 'Proper-subset' (aka. "zone.issubset(other) and zone != other")
+                    exclusion_zones.pop(other)  # Pull out larger group for modification
+                    new_zone = frozenset(other - zone)  # Remove smaller group from larger group
+
+                    if other_level - level > 0:
+                        # Update # of mines in 'larger' group after removing smaller group;
+                        #  Put back modified 'larger' group
+                        exclusion_zones[new_zone] = other_level - level
+                    else:
+                        # OR,
+                        #   If the # of mines in the modified group is 0,
+                        #   we can safely open all spaces in that group, instead
+                        for pos in new_zone:
+                            lookup[pos].hint = f'{open(*pos)}'
+                            updated = True
+        if display:
+            print(hashmaptostring(lookup, len(board_2d), len(board_2d[0])))
+            print()
+        return updated
+
     def open_zeros(display: bool = False) -> None:
         """
         Unveil hints of squares neighboring a square with no surrounding mines.
@@ -145,55 +256,25 @@ def solve_mine(map: str, n: int) -> str:
             print()
         return space_unpacked
 
-    def find_safe_spaces(display: bool = False) -> bool:
+    def find_safe_spaces(display: bool = False) -> Tuple[bool, int]:
         """
         Use set operations to further deduce which squares ARE NOT holding mines based off visible hints & 'open' them.
 
         :param display: Prints board state after execution if True
-        :return: True if board state was altered during this invocation
+        :return: True if board state was altered + the # of mines marked during this invocation
         """
 
+        mine_found = False
         updated = False
 
-        # Get '?'-adjacent hint spaces
-        frontier = {pos: space for pos, space in lookup.items() if
-                    space.hint.isnumeric() and any(lookup[n].hint == '?' for n in space.neighbors.values() if n)}
+        frontier = get_frontier()
+        exclusion_zones = get_exclusion_zones(frontier)
 
-        # Group the frontier-adjacent '?' spaces into pairs of "zone, frequency"
-        #   where 'zone' is a group of spaces & 'frequency' is the # of mines hiding in zone.
-        exclusion_zones = {}
-        for pos, space in frontier.items():
-            nunkown = int(space.hint) - sum(1 for n in space.neighbors.values() if n and lookup[n].hint == 'x')
-            exclusion_zones.update(
-                {frozenset(n for n in space.neighbors.values() if n and lookup[n].hint == '?'): nunkown})
-
-        # Check for zones which are entirely within a bigger zone
-        for zone, level in sorted(list(exclusion_zones.items()), key=lambda pair: len(pair[0]), reverse=False):
-            for other, other_level in sorted(list(exclusion_zones.items()), key=lambda pair: len(pair[0]),
-                                             reverse=True):
-                if len(zone) > len(other):
-                    # other can't contain zone if zone has more items
-                    break
-                elif zone < other:  # set operation: 'Proper-subset' (aka. "zone.issubset(other) and zone != other")
-                    exclusion_zones.pop(other)  # Pull out larger group for modification
-                    new_zone = frozenset(other - zone)  # Remove smaller group from larger group
-
-                    if other_level - level > 0:
-                        # Update # of mines in 'larger' group after removing smaller group;
-                        #  Put back modified 'larger' group
-                        exclusion_zones[new_zone] = other_level - level
-                    else:
-                        # OR,
-                        #   If the # of mines in the modified group is 0,
-                        #   we can safely open all spaces in that group, instead
-                        for pos in new_zone:
-                            lookup[pos].hint = f'{open(*pos)}'
-                            updated = True
-
-        if display and updated:
-            print(hashmaptostring(lookup, len(board_2d), len(board_2d[0])))
-            print()
-        return updated
+        while not updated:
+            updated |= find_by_exclusion_zone(exclusion_zones, display)
+            if not updated:
+                updated, mine_found = update_zones(exclusion_zones)
+        return updated, mine_found
 
     board_2d = splitgrid(map)
     lookup = boardtohashmap(board_2d)
@@ -216,10 +297,12 @@ def solve_mine(map: str, n: int) -> str:
 
         if not updated:
             # Find & open additional safe spaces using set operations
-            if find_safe_spaces(display):
+            space_updated, mine_found = find_safe_spaces(display)
+            nfound += mine_found
+            if space_updated:
                 continue
 
-            if display:
+            if True:
                 print(hashmaptostring(lookup, len(board_2d), len(board_2d[0])))
                 print()
             return '?'
@@ -242,7 +325,7 @@ def main():
     nmines = nrows * ncols // 5
     board, key = gen_board(nrows, ncols, nmines)
 
-    key = """1 x 1 1 x 1
+    '''key = """1 x 1 1 x 1
 2 2 2 1 2 2
 2 x 2 0 1 x
 2 x 2 1 2 2
@@ -255,9 +338,72 @@ def main():
 ? ? ? ? ? ?
 ? ? ? ? ? ?
 0 0 0 ? ? ?"""
-    nmines = 6
+    nmines = 6'''
+
+    key = """1 x 1 0 1 1 1 0 1 x 2 x 1 0 0 0 1 x 1 0 0 0 0 0 0 1 1 1 0 0
+1 1 1 0 1 x 2 2 3 2 2 1 1 0 0 0 1 1 2 1 1 0 0 0 0 1 x 1 0 0
+0 0 0 1 2 2 2 x x 2 1 1 0 0 0 0 0 0 1 x 1 0 0 0 0 1 2 2 1 0
+1 1 1 1 x 1 1 2 2 2 x 1 1 1 1 0 0 0 1 1 1 0 0 0 0 0 2 x 2 0
+2 x 1 1 1 1 1 1 1 1 1 1 1 x 2 1 0 0 0 1 1 1 0 0 0 0 2 x 2 0
+x 2 1 0 0 0 1 x 1 0 0 0 2 3 x 1 0 0 0 1 x 1 0 0 0 0 1 1 1 0
+1 1 0 0 0 0 2 2 2 0 0 0 1 x 2 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0
+0 0 0 0 0 0 1 x 1 0 0 0 2 2 2 0 1 1 1 0 0 0 1 1 1 1 x 1 0 0
+0 0 0 0 1 1 2 1 1 0 0 0 1 x 1 0 1 x 1 1 1 2 2 x 1 1 1 1 0 0
+0 0 0 0 1 x 1 0 0 0 0 0 1 1 1 0 2 2 2 2 x 3 x 2 1 0 0 0 1 1
+0 0 0 0 1 1 1 0 0 0 0 1 1 1 0 0 1 x 1 2 x 4 2 2 0 1 1 1 1 x
+0 1 1 1 0 0 0 0 0 0 0 1 x 1 0 0 1 2 2 2 1 2 x 1 0 1 x 1 1 1
+0 1 x 2 1 2 1 1 0 0 0 1 1 1 0 0 0 1 x 1 0 1 2 2 1 1 1 1 0 0
+0 1 1 2 x 2 x 3 2 1 0 1 2 2 1 0 0 1 2 2 1 0 1 x 1 0 0 0 0 0
+1 1 0 1 1 2 2 x x 1 0 1 x x 1 0 0 0 1 x 1 0 1 2 2 1 0 0 0 0
+x 1 0 0 0 0 2 3 3 1 0 1 2 2 1 0 0 0 1 1 1 0 0 2 x 2 0 0 0 0
+1 1 0 0 0 0 1 x 1 0 0 0 0 1 1 1 0 0 0 0 0 0 0 2 x 3 1 0 0 0
+0 0 0 0 0 0 1 1 1 0 0 0 0 1 x 1 0 0 0 1 1 1 0 1 2 x 1 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 2 x 2 0 1 2 2 1 0 0 0
+1 2 2 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 x 2 0 1 x 1 0 1 1 1
+1 x x 1 1 1 1 0 1 1 1 0 0 1 1 2 1 1 0 1 1 1 1 2 2 1 0 1 x 1
+1 2 3 2 2 x 1 0 1 x 2 1 0 1 x 3 x 2 0 0 0 0 1 x 1 0 0 1 1 1
+0 0 1 x 3 2 2 0 1 2 x 1 1 2 2 3 x 3 1 0 0 0 1 1 1 0 0 0 0 0
+0 0 1 1 2 x 1 0 0 1 1 2 2 x 2 2 2 x 2 1 1 0 0 0 0 0 0 0 0 0
+0 0 0 0 1 1 1 0 0 0 0 1 x 4 x 1 1 1 2 x 1 1 1 1 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 1 1 2 2 x 2 1 0 0 1 1 1 1 x 2 1 1 0 0 0 0
+0 0 0 0 0 1 1 2 1 2 x 1 1 1 1 0 0 1 2 2 1 1 1 2 x 2 1 1 1 1
+0 0 0 0 0 1 x 4 x 4 2 1 0 0 0 0 0 2 x x 2 2 2 2 3 x 2 1 x 1
+0 0 0 0 0 1 2 x x x 1 0 0 0 0 0 0 2 x 3 2 x x 1 2 x 2 1 1 1"""
+
+    board = """? ? ? 0 ? ? ? 0 ? ? ? ? ? 0 0 0 ? ? ? 0 0 0 0 0 0 ? ? ? 0 0
+? ? ? 0 ? ? ? ? ? ? ? ? ? 0 0 0 ? ? ? ? ? 0 0 0 0 ? ? ? 0 0
+0 0 0 ? ? ? ? ? ? ? ? ? 0 0 0 0 0 0 ? ? ? 0 0 0 0 ? ? ? ? 0
+? ? ? ? ? ? ? ? ? ? ? ? ? ? ? 0 0 0 ? ? ? 0 0 0 0 0 ? ? ? 0
+? ? ? ? ? ? ? ? ? ? ? ? ? ? ? ? 0 0 0 ? ? ? 0 0 0 0 ? ? ? 0
+? ? ? 0 0 0 ? ? ? 0 0 0 ? ? ? ? 0 0 0 ? ? ? 0 0 0 0 ? ? ? 0
+? ? 0 0 0 0 ? ? ? 0 0 0 ? ? ? ? 0 0 0 ? ? ? 0 0 0 ? ? ? 0 0
+0 0 0 0 0 0 ? ? ? 0 0 0 ? ? ? 0 ? ? ? 0 0 0 ? ? ? ? ? ? 0 0
+0 0 0 0 ? ? ? ? ? 0 0 0 ? ? ? 0 ? ? ? ? ? ? ? ? ? ? ? ? 0 0
+0 0 0 0 ? ? ? 0 0 0 0 0 ? ? ? 0 ? ? ? ? ? ? ? ? ? 0 0 0 ? ?
+0 0 0 0 ? ? ? 0 0 0 0 ? ? ? 0 0 ? ? ? ? ? ? ? ? 0 ? ? ? ? ?
+0 ? ? ? 0 0 0 0 0 0 0 ? ? ? 0 0 ? ? ? ? ? ? ? ? 0 ? ? ? ? ?
+0 ? ? ? ? ? ? ? 0 0 0 ? ? ? 0 0 0 ? ? ? 0 ? ? ? ? ? ? ? 0 0
+0 ? ? ? ? ? ? ? ? ? 0 ? ? ? ? 0 0 ? ? ? ? 0 ? ? ? 0 0 0 0 0
+? ? 0 ? ? ? ? ? ? ? 0 ? ? ? ? 0 0 0 ? ? ? 0 ? ? ? ? 0 0 0 0
+? ? 0 0 0 0 ? ? ? ? 0 ? ? ? ? 0 0 0 ? ? ? 0 0 ? ? ? 0 0 0 0
+? ? 0 0 0 0 ? ? ? 0 0 0 0 ? ? ? 0 0 0 0 0 0 0 ? ? ? ? 0 0 0
+0 0 0 0 0 0 ? ? ? 0 0 0 0 ? ? ? 0 0 0 ? ? ? 0 ? ? ? ? 0 0 0
+0 0 0 0 0 0 0 0 0 0 0 0 0 ? ? ? 0 0 0 ? ? ? 0 ? ? ? ? 0 0 0
+? ? ? ? 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 ? ? ? 0 ? ? ? 0 ? ? ?
+? ? ? ? ? ? ? 0 ? ? ? 0 0 ? ? ? ? ? 0 ? ? ? ? ? ? ? 0 ? ? ?
+? ? ? ? ? ? ? 0 ? ? ? ? 0 ? ? ? ? ? 0 0 0 0 ? ? ? 0 0 ? ? ?
+0 0 ? ? ? ? ? 0 ? ? ? ? ? ? ? ? ? ? ? 0 0 0 ? ? ? 0 0 0 0 0
+0 0 ? ? ? ? ? 0 0 ? ? ? ? ? ? ? ? ? ? ? ? 0 0 0 0 0 0 0 0 0
+0 0 0 0 ? ? ? 0 0 0 0 ? ? ? ? ? ? ? ? ? ? ? ? ? 0 0 0 0 0 0
+0 0 0 0 0 0 0 0 0 ? ? ? ? ? ? ? 0 0 ? ? ? ? ? ? ? ? 0 0 0 0
+0 0 0 0 0 ? ? ? ? ? ? ? ? ? ? 0 0 ? ? ? ? ? ? ? ? ? ? ? ? ?
+0 0 0 0 0 ? ? ? ? ? ? ? 0 0 0 0 0 ? ? ? ? ? ? ? ? ? ? ? ? ?
+0 0 0 0 0 ? ? ? ? ? ? 0 0 0 0 0 0 ? ? ? ? ? ? ? ? ? ? ? ? ?"""
+
+    nmines = key.count('x')
 
     res = solve_mine(board, nmines)
+    print(res)
     assert key == res
 
 
