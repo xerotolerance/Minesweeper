@@ -1,4 +1,6 @@
-from typing import Union, List
+#  Copyright (c) 2020. Christopher J Maxwell <contact@christopherjmaxwell.com>
+
+from typing import List, Union
 
 from minesweeper import gen_board
 

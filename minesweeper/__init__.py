@@ -1,7 +1,17 @@
+#  Copyright (c) 2020. Christopher J Maxwell <contact@christopherjmaxwell.com>
+
+from os import name, system
 from random import shuffle
+from time import sleep
 from typing import List
 
 key = None
+
+
+def clearscreen(enabled=False):
+    if enabled:
+        system('cls' if name == 'nt' else 'clear')
+        sleep(.01)
 
 
 def open(row: int, column: int) -> int:

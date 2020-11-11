@@ -213,9 +213,9 @@ def gameArgs(request):
 
 
 # Run Suite
-@pytest.mark.timeout(3)
+@pytest.mark.timeout(0)
 def test_solve_mine(gameArgs):
-    from minesweeper.v2 import solve_mine
+    from minesweeper.v3 import solve_mine
     minesweeper.key = gameArgs.key
     assert solve_mine(gameArgs.board, gameArgs.nmines) == gameArgs.ans
 

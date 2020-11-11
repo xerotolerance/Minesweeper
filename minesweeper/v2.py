@@ -1,7 +1,9 @@
-from typing import List, Dict, Tuple, FrozenSet, Optional
+#  Copyright (c) 2020. Christopher J Maxwell <contact@christopherjmaxwell.com>
+
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
 import minesweeper
-from minesweeper import open
+from minesweeper import clearscreen, open
 
 
 class Gridspace:
@@ -11,6 +13,7 @@ class Gridspace:
         self.row = r
         self.col = c
         self.hint = hint
+        self.ties = set()
         self.neighbors = {
             'up': (r - 1, c) if r - 1 > -1 else None,
             'left': (r, c - 1) if c - 1 > -1 else None,
@@ -21,9 +24,25 @@ class Gridspace:
             'top_right': (r - 1, c + 1) if r - 1 > -1 and c + 1 < ncols else None,
             'bottom_right': (r + 1, c + 1) if r + 1 < nrows and c + 1 < ncols else None
         }
+        self.num_undiscovered = -1
+        self.zones = {}
+
+    @property
+    def position(self) -> Tuple:
+        """
+        Get the grid position of this space.
+
+        :return: The row & column of this space.
+        """
+        return self.row, self.col
+
+    def __str__(self):
+        return f'({self.row},{self.col}): {self.hint}: {self.num_undiscovered}'
 
     def __repr__(self):
-        return f'({self.row},{self.col}: {self.hint})'
+        return f'Position: ({self.row},{self.col})' \
+               f'Hint: {self.hint}' \
+               f'# Undiscovered mines in vicinity: {self.num_undiscovered}'
 
 
 def boardtohashmap(board_2d: List[List[str]]) -> Dict[Tuple[int, int], Gridspace]:
@@ -75,11 +94,17 @@ def solve_mine(map: str, n: int) -> str:
     """
 
     def get_frontier() -> Dict[Tuple[int, int], Gridspace]:
-        # Get '?'-adjacent hint spaces
+        """
+        Get '?'-adjacent hint spaces
+
+        :return: a dictionary of coordinates pairs & Gridspace objects identifying spaces w/ a neighboring '?'
+        """
+
         return {pos: space for pos, space in lookup.items() if space.hint.isnumeric() and any(
             lookup[neighbor].hint == '?' for neighbor in space.neighbors.values() if neighbor)}
 
-    def get_exclusion_zones(frontier: Dict[Tuple[int, int], Gridspace]) -> Dict[FrozenSet[Optional[Tuple[int, int]]], int]:
+    def get_exclusion_zones(frontier: Dict[Tuple[int, int], Gridspace]) -> Dict[
+        FrozenSet[Optional[Tuple[int, int]]], int]:
         """
         Group the frontier-adjacent '?' spaces into pairs of "zone, frequency", where 'zone' is a group of spaces & 'frequency' is the # of mines hiding in zone.
 
@@ -144,12 +169,14 @@ def solve_mine(map: str, n: int) -> str:
                                     lookup[set(new_zone).pop()].hint = 'x'
                                     mine_found = True
                                     if display:
+                                        clearscreen()
                                         print(hashmaptostring(lookup, nrows, ncols))
                                         print()
                                     return mine_found, mine_found
         return zone_added, mine_found
 
-    def find_by_exclusion_zone(exclusion_zones: Dict[FrozenSet[Optional[Tuple[int, int]]], int], display: bool = False) -> bool:
+    def find_by_exclusion_zone(exclusion_zones: Dict[FrozenSet[Optional[Tuple[int, int]]], int],
+                               display: bool = False) -> bool:
         """
         Find & open safe-spaces by comparing zones of mutual exclusivity based off exposed hints.
 
@@ -158,6 +185,7 @@ def solve_mine(map: str, n: int) -> str:
         :return: True if board state was altered. (Updates param exclusion_zones & solve_mine.lookup by side-effect)
         """
 
+        opened = set()
         updated = False
         # Check for zones which are entirely within a different, larger zone
         for zone, level in sorted(list(exclusion_zones.items()), key=lambda pair: len(pair[0]), reverse=False):
@@ -180,9 +208,23 @@ def solve_mine(map: str, n: int) -> str:
                         #   If the # of mines in the modified group is 0,
                         #   we can safely open all spaces in that group, instead
                         for pos in new_zone:
-                            lookup[pos].hint = f'{open(*pos)}'
-                            updated = True
+                            if lookup[pos].hint == '?':
+                                lookup[pos].hint = f'{open(*pos)}'
+                                opened.add(pos)
+                                updated = True
+                                if display:
+                                    clearscreen()
+                                    print(hashmaptostring(lookup, nrows, ncols))
+                                    print()
+
+        for zone, freq in list(exclusion_zones.items()):
+            new_zone = zone - opened
+            exclusion_zones.pop(zone)
+            if new_zone:
+                exclusion_zones[new_zone] = freq
+
         if display:
+            clearscreen()
             print(hashmaptostring(lookup, nrows, ncols))
             print()
         return updated
@@ -203,6 +245,7 @@ def solve_mine(map: str, n: int) -> str:
                     if neighbor and lookup[neighbor].hint == '?':
                         lookup[neighbor].hint = f"{open(*neighbor)}"
         if display:
+            clearscreen()
             print(hashmaptostring(lookup, nrows, ncols))
             print()
 
@@ -225,6 +268,7 @@ def solve_mine(map: str, n: int) -> str:
                             lookup[neighbor].hint = 'x'
                             nfound += 1
         if display and nfound:
+            clearscreen()
             print(hashmaptostring(lookup, nrows, ncols))
             print()
         return nfound
@@ -248,6 +292,7 @@ def solve_mine(map: str, n: int) -> str:
                             lookup[neighbor].hint = f"{open(*neighbor)}"
                             space_unpacked = True
         if display and space_unpacked:
+            clearscreen()
             print(hashmaptostring(lookup, nrows, ncols))
             print()
         return space_unpacked
@@ -277,7 +322,10 @@ def solve_mine(map: str, n: int) -> str:
             updated |= find_by_exclusion_zone(exclusion_zones, display)
             if len(exclusion_zones) == 3:
                 print(end='')
+            old_zones = exclusion_zones
             zone_found, mine_found = update_zones(exclusion_zones)
+            if old_zones == exclusion_zones:
+                print(end='')
             updated |= mine_found
         return updated, mine_found
 
@@ -311,6 +359,7 @@ def solve_mine(map: str, n: int) -> str:
                 continue
 
             if display:
+                clearscreen()
                 print(hashmaptostring(lookup, nrows, ncols))
                 print()
             return '?'
@@ -321,6 +370,7 @@ def solve_mine(map: str, n: int) -> str:
             space.hint = f'{open(*pos)}'
 
     if display:
+        clearscreen()
         print(hashmaptostring(lookup, nrows, ncols))
         print()
     return hashmaptostring(lookup, nrows, ncols)
