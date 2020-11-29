@@ -237,13 +237,13 @@ def gameArgs(request):
 # Run Suite
 @pytest.mark.timeout(3)
 def test_solve_mine(gameArgs):
-    from minesweeper.v3 import solve_mine
+    from minesweeper.v4 import solve_mine
     minesweeper.key = gameArgs.key
     assert solve_mine(gameArgs.board, gameArgs.nmines) == gameArgs.ans
 
 
 # Run specific test
-@pytest.mark.parametrize('gameArgs', [Args(boardlist[-1], keylist[-1], anslist[-1])])
+@pytest.mark.parametrize('gameArgs', [Args(boardlist[1], keylist[1], anslist[1])])
 @pytest.mark.timeout(0)
 def test_directed(gameArgs):
     test_solve_mine(gameArgs)

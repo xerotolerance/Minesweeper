@@ -16,6 +16,7 @@ class GameState:
         self._nmines = 0
         self._nfound = 0
         self._unknowns = None
+        self._remaining_zones = None
 
     def _open(self, row: int, col: int) -> None:
         """
@@ -35,7 +36,8 @@ class GameState:
         # open this space
         n_hinted = open(row, col)
         this_space.hint = str(n_hinted)
-        n_marked = sum(1 for neighbor in this_space.neighbors.values() if neighbor and self._lookup[neighbor].hint == 'x')
+        n_marked = sum(
+            1 for neighbor in this_space.neighbors.values() if neighbor and self._lookup[neighbor].hint == 'x')
         this_space.num_undiscovered = n_hinted - n_marked
 
         # open safe neighbors
@@ -175,6 +177,7 @@ class GameState:
                 self._lookup[unknown].zones[key] = self._lookup[unknown].zones.setdefault(key, space.num_undiscovered)
                 self._lookup[unknown].zones[key] = min(space.num_undiscovered, self._lookup[unknown].zones[key])
                 self._lookup[unknown].ties |= local_unknowns - {unknown}
+                self._remaining_zones.update(self._lookup[unknown].zones)
 
         # split overlapping zones into components
         for unknown in self._unknowns.values():
@@ -184,14 +187,59 @@ class GameState:
                 for other_zone, other_num_undiscovered in list(unknown.zones.items()):
                     if other_zone in unknown.zones:
                         shared = zone & other_zone
+
                         if zone < other_zone or (shared and other_num_undiscovered > num_undiscovered):
                             # if "zone" & "other_zone" share members then
                             #  it is possible to split the zone w/ the higher # of mines
                             #   into components, "shared" & "not_shared".
-                            unknown.zones.pop(other_zone)
+
+                            # unknown.zones.pop(other_zone)
+
                             not_shared = other_zone - shared
                             unknown.zones[not_shared] = other_num_undiscovered - num_undiscovered
+                        else:
+                            print(end='')
+        return
 
+    """def _expand_ties(self):
+        subzones = {}
+        unknowns = {unknown: space for unknown, space in self._unknowns.items() if any(
+            neighbor and neighbor not in self._unknowns for neighbor in space.neighbors.values())}
+        while True:
+            new_additions = {}
+            for unknown, space in unknowns.items():
+                outer = sorted(space.zones.items(), key=lambda pair: len(pair[0]))
+                for zone, freq in outer:
+                    inner = sorted(space.zones.items(), key=lambda pair: len(pair[0]), reverse=True)
+                    for other_zone, other_freq in inner:
+                        if zone != other_zone:
+                            shared = zone & other_zone
+                            other_exclusive = other_zone - shared
+                            zone_exclusive = zone - shared
+                            if zone < other_zone:
+                                new_freq = other_freq - freq
+                                if other_exclusive and other_exclusive not in new_additions and other_exclusive not in subzones:
+                                    new_additions[other_exclusive] = new_freq
+                            else:
+                                shared_constraint = min(len(shared), freq, other_freq)  # max num mines in shared
+                                if freq - shared_constraint == 1:
+                                    if zone_exclusive and zone_exclusive not in new_additions and zone_exclusive not in subzones:
+                                        new_additions[zone_exclusive] = 1
+                                elif other_freq - shared_constraint == 1:
+                                    if other_exclusive and other_exclusive not in new_additions and other_exclusive not in subzones:
+                                        new_additions[other_exclusive] = 1
+
+            if new_additions:
+                subzones.update(new_additions)
+                print(end='')
+                for _ in range(len(new_additions)):
+                    zone, freq = new_additions.popitem()
+                    for pos in zone:
+                        self._lookup[pos].zones[zone] = freq
+            else:
+                break
+        return
+"""
     def get_solution(self, display=False) -> str:
         """
         Plays a game of Minesweeper until its logical conclusion without making a guess.
@@ -210,9 +258,11 @@ class GameState:
         while self._nfound < self._nmines:
             self._mark_spaces(display)
             board_altered = self._open_safe_spaces(display)
-            if not board_altered:
+            if not board_altered and len(self._unknowns):
                 # Create exclusion zones
                 self._make_ties()
+
+                # self._expand_ties()
 
                 # Find safe spaces
                 safe_spaces = {pos: zone for unknown in self._unknowns.values() for zone, num_undiscovered in
@@ -224,7 +274,7 @@ class GameState:
                 if display and safe_spaces:
                     print('After "Logical Analysis - Safe Spaces":')
                     print(repr(self), "\n")
-                    
+
                 # Find mines
                 mines = {pos: zone for unknown in self._unknowns.values() for zone, num_undiscovered in
                          unknown.zones.items() for pos in zone if num_undiscovered == len(zone)}
@@ -235,6 +285,9 @@ class GameState:
                 if display and mines:
                     print('After "Logical Analysis - Mines":')
                     print(repr(self), "\n")
+
+                """remaining_zones = {pos: zone for unknown in self._unknowns.values() for zone, num_undiscovered in 
+                                   unknown.zones.items() for pos in zone}"""
 
                 # Enter fail state if no changes were made to the board
                 if not safe_spaces and not mines:
@@ -276,6 +329,7 @@ class GameState:
         state._nmines = nmines
         state._lookup = boardtohashmap(board_2d)
         state._unknowns = {pos: space for pos, space in state._lookup.items() if space.hint == '?'}
+        state._remaining_zones = {}
         return state
 
     def __str__(self):
@@ -305,6 +359,8 @@ class Gridspace:
         }
         self.num_undiscovered = -1
         self.zones = {}
+        self.subzones = {}
+
 
     @property
     def position(self) -> Tuple[int, int]:
@@ -319,9 +375,9 @@ class Gridspace:
         return f'({self.row},{self.col}): {self.hint}: {self.num_undiscovered}'
 
     def __repr__(self):
-        return f'Position: ({self.row},{self.col})' \
-               f'Hint: {self.hint}' \
-               f'# Undiscovered mines in vicinity: {self.num_undiscovered}'
+        return f'{{Position: ({self.row},{self.col}) | ' \
+               f'Hint: {self.hint} | ' \
+               f'# Undiscovered mines in vicinity: {self.num_undiscovered}}}'
 
 
 def boardtohashmap(board_2d: List[List[str]]) -> Dict[Tuple[int, int], Gridspace]:
@@ -365,7 +421,7 @@ def splitgrid(gridstr: str) -> List[List[str]]:
 
 def solve_mine(map: str, n: int) -> str:
     this_game = GameState.fromboardstr(map, n)
-    return this_game.get_solution()
+    return this_game.get_solution(True)
 
 
 def main():
